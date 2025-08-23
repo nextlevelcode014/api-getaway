@@ -33,8 +33,14 @@ class Client(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String, nullable=False)
-    email = Column(String, nullable=False, unique=True)  # Added unique constraint
-    models = relationship("Model", back_populates="client")
+    email = Column(String, nullable=False, unique=True)
+    keys = relationship(
+        "ClientKey",
+        back_populates="client_rel",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    models = relationship("Model", secondary=client_models, back_populates="clients")
     plan = Column(String, default="normal")
     monthly_limit = Column(Integer, default=1000)
     used_current_month = Column(Integer, default=0)
@@ -63,13 +69,11 @@ class Model(Base):
     __tablename__ = "models"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    client_id = Column(Integer, ForeignKey("clients.id"))
-    model_name = Column(String, nullable=False)
-    client = relationship("Client", back_populates="models")
+    model_name = Column(String, nullable=False, unique=True)
+    clients = relationship("Client", secondary=client_models, back_populates="models")
     token_limit = Column(Integer, nullable=True)
 
-    def __init__(self, client_id, model_name, token_limit):
-        self.client_id = client_id
+    def __init__(self, model_name, token_limit):
         self.model_name = model_name
         self.token_limit = token_limit
 
@@ -78,11 +82,11 @@ class ClientKey(Base):
     __tablename__ = "client_keys"
 
     id = Column(Integer, primary_key=True, autoincrement=True, nullable=True)
-    client = Column(ForeignKey("clients.id"))
+    client = Column(Integer, ForeignKey("clients.id", ondelete="CASCADE"))
     client_key_hash = Column(String, nullable=True, unique=True)
     active = Column(Boolean, default=True)
     created_at = Column(DateTime, server_default=func.now())
-    client_rel = relationship("Client", backref="keys")
+    client_rel = relationship("Client", back_populates="keys")
 
     def __init__(self, client_id, client_key_hash):
         self.client = client_id

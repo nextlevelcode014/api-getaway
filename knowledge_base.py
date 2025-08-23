@@ -2,7 +2,11 @@ from langchain_community.document_loaders import PyPDFDirectoryLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_chroma.vectorstores import Chroma
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from config import BASE
+from dotenv import load_dotenv
+
+load_dotenv()
+
+base = "base"
 
 
 def create_db():
@@ -12,7 +16,7 @@ def create_db():
 
 
 def load_documents():
-    loader = PyPDFDirectoryLoader(BASE)
+    loader = PyPDFDirectoryLoader(base)
     return loader.load()
 
 

@@ -13,4 +13,3 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 
 DATABASE_PATH = "database"
-BASE = "base"
