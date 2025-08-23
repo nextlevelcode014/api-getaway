@@ -7,3 +7,10 @@ SECRET_KEY = os.getenv("SECRET_KEY")
 ADMIN_API_KEY = os.getenv("ADMIN_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL")
+
+GEMINI_BASE_URL = os.getenv("GEMINI_BASE_URL")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+
+DATABASE_PATH = "database"
+BASE = "base"

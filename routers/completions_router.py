@@ -8,10 +8,9 @@ from datetime import datetime
 # from utils.dependencies import verify_api_key
 from schema import ChatRequest
 from utils.auth_dependencies import get_current_client
-from config import OPENAI_API_KEY, OPENAI_BASE_URL
+from text_response import quetion
 
 # import hashlib
-import time
 import httpx
 
 completions_router = APIRouter(prefix="/v1", tags=["completions"])
@@ -35,42 +34,16 @@ async def completions(
             status_code=status.HTTP_403_FORBIDDEN, detail="Model not allowed"
         )
 
-    start_time = time.time()
-
     try:
-        headers = {
-            "Authorization": f"Bearer {OPENAI_API_KEY}",
-            "Content-Type": "application/json",
-        }
+        text_response = quetion(chat_request.prompt, chat_request.model)
+        return {"response": text_response}
 
-        payload = chat_request.model_dump(exclude_unset=True)
-
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(
-                f"{OPENAI_BASE_URL}/chat/completions", headers=headers, json=payload
-            )
-
-            if response.status_code != 200:
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail=f"OpenAI error: {response.text}",
-                )
-
-        durarion = time.time() - start_time
-
-        return response.json()
     except httpx.TimeoutException:
         raise HTTPException(
-            status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="OpenAI request timeout"
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="Provider timeout"
         )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error",
+            detail=f"Internal error: {str(e)}",
         )
-
-    return {
-        "client": client.name,
-        "token": token,
-        "remaining_requests": client.monthly_limit - client.used_current_month,
-    }

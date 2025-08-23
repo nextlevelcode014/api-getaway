@@ -4,8 +4,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from routers.completions_router import completions_router
 from routers.admin_router import admin_router
 
-from passlib.context import CryptContext
-
 
 app = FastAPI(
     title="Reseller API",
@@ -13,7 +11,6 @@ app = FastAPI(
     version="1.0.0",
 )
 
-bcrypt_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # CORS
 app.add_middleware(
@@ -23,10 +20,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-OPENAI_API_KEY = "sua-chave-openai-aqui"
-OPENAI_BASE_URL = "https://api.openai.com/v1"
 
 
 @app.get("/")
