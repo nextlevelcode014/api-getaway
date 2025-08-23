@@ -1,17 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPBearer
 
 from routers.completions_router import completions_router
 from routers.admin_router import admin_router
 
 from passlib.context import CryptContext
-from dotenv import load_dotenv
-import os
 
-load_dotenv()
-
-SECRET_KEY = os.getenv("SECRET_KEY")
 
 app = FastAPI(
     title="Reseller API",
@@ -30,7 +24,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-security = HTTPBearer
 
 OPENAI_API_KEY = "sua-chave-openai-aqui"
 OPENAI_BASE_URL = "https://api.openai.com/v1"
