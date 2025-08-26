@@ -4,12 +4,16 @@ from sqlalchemy.orm import Session
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from schema import ChatRequest
+from schema.schemas import ChatRequestSchema
 from utils.auth_dependencies import get_current_client
 from text_response import question
-from utils.dependencies import create_session
-from model.db import ClientLog, Model
-from config import VALUE_PER_REQUEST, MAX_USER_CHARS
+from utils.config_dependencies import (
+    create_session,
+    calculate_gemini_cost,
+    calculate_openai_cost,
+)
+from model.db import ClientReqLog, Model
+from config import MAX_USER_CHARS, VALUE_PER_REQUEST
 
 completions_router = APIRouter(prefix="/v1", tags=["completions"])
 
@@ -21,7 +25,7 @@ async def health_check():
 
 @completions_router.post("/chat/completions")
 async def completions(
-    chat_request: ChatRequest,
+    chat_request: ChatRequestSchema,
     client_data=Depends(get_current_client),
     session: Session = Depends(create_session),
 ):
@@ -31,7 +35,7 @@ async def completions(
             detail=f"Maximum characters exceeded: Maximum {MAX_USER_CHARS}",
         )
 
-    client, token = client_data
+    client = client_data
 
     allowed_models = [m.model_name for m in client.models]
     if chat_request.model not in allowed_models:
@@ -39,28 +43,48 @@ async def completions(
             status_code=status.HTTP_403_FORBIDDEN, detail="Model not allowed"
         )
 
-    # total tokens used
     result = question(client.id, chat_request.prompt, chat_request.model)
 
     model = session.query(Model).filter(Model.model_name == chat_request.model).first()
 
-    total_tokens = Decimal(result["usage"]["total_tokens"])
-    value_per_token = Decimal(str(model.value_per_token or 0))
+    input_tokens = result["usage"]["input_tokens"]
+    output_tokens = result["usage"]["output_tokens"]
 
-    cost = (Decimal(VALUE_PER_REQUEST or 0)) + total_tokens * value_per_token
+    cost = 0
 
-    client.requests_used += 1
-    client.tokens_used += result["usage"]["total_tokens"]
+    if chat_request.model.startswith("gpt-"):
+        cost = calculate_openai_cost(
+            input_price=model.input_price,
+            output_price=model.output_price,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
+    elif chat_request.model.startswith("gemini-"):
+        cost = calculate_gemini_cost(
+            input_price=model.input_price,
+            output_price=model.output_price,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
+
+    total_tokens = result["usage"]["total_tokens"]
+
+    client.total_request_current_month += 1
+    client.total_cost_of_requests = (
+        client.total_cost_of_requests or Decimal("0")
+    ) + Decimal(VALUE_PER_REQUEST)
+    client.total_tokens += total_tokens
     client.amount_due = (client.amount_due or Decimal("0")) + cost
     client.last_request_at = datetime.now(timezone.utc)
 
-    log = ClientLog(
+    log = ClientReqLog(
         client_id=client.id,
         endpoint="chat/completions",
-        prompt_tokens=result["usage"]["prompt_tokens"],
-        completion_tokens=result["usage"]["completion_tokens"],
-        total_tokens=result["usage"]["total_tokens"],
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=total_tokens,
         cost=cost,
+        model_used=chat_request.model,
     )
     session.add(log)
     session.commit()
@@ -68,8 +92,8 @@ async def completions(
     return {
         "response": result["response"],
         "usage": {
-            "prompt_tokens": result["usage"]["prompt_tokens"],
-            "completion_tokens": result["usage"]["completion_tokens"],
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
             "total_tokens": total_tokens,
             "cost": str(cost),
         },

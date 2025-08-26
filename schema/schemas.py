@@ -14,7 +14,11 @@ class ClientSchema(BaseModel):
 class ModelSchema(BaseModel):
     model_name: str
     token_limit: int
-    value_per_token: float
+    input_price: float
+    output_price: float
+
+    class Config:
+        from_attributes = True
 
 
 class ClientUpdateSchema(BaseModel):
@@ -22,6 +26,9 @@ class ClientUpdateSchema(BaseModel):
     email: Optional[str] = None
     active: Optional[bool] = None
     monthly_limit: Optional[str] = None
+
+    class Config:
+        from_attributes = True
 
 
 class ApiKeySchema(BaseModel):
@@ -32,9 +39,14 @@ class ApiKeySchema(BaseModel):
         from_attributes = True
 
 
-class ChatRequest(BaseModel):
+class ChatRequestSchema(BaseModel):
     prompt: str
     model: str
 
     class Config:
         from_attributes = True
+
+
+class AddClientModelSchema(BaseModel):
+    model_id: str
+    client_id: str

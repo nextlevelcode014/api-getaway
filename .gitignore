@@ -13,3 +13,5 @@ uv.lock
 database
 base
 todo.txt
+vectorstores
+migrations
