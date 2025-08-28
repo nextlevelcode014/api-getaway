@@ -64,19 +64,15 @@ class Client(Base):
     )
     upload_tokens = Column(Float, default=0)
     active = Column(Boolean, default=True)
-    invoice_due_day = Column(DateTime, nullable=True)
+    invoice_due_day = Column(Integer, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     last_reset = Column(DateTime, server_default=func.now())
 
-    def __init__(
-        self,
-        name,
-        email,
-        monthly_limit,
-    ):
+    def __init__(self, name, email, monthly_limit, invoice_due_day):
         self.name = name
         self.email = email
         self.monthly_limit = monthly_limit
+        self.invoice_due_day = invoice_due_day
 
 
 class ClientReqLog(Base):

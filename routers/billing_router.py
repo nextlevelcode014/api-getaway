@@ -5,8 +5,7 @@ from utils.config_dependencies import get_session
 from utils.auth_dependencies import verify_admin_key
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from utils.billing import send_invoice, get_clients_due_today
-from model.db import Client
-import asyncio
+from model.db import Client, async_session
 
 
 invoice_router = APIRouter(prefix="/billing", tags=["billing"])
@@ -29,9 +28,9 @@ async def send_invoice_manually(
     return {"status": "Invoice sent successfully"}
 
 
-@invoice_router.post("/send-invoice-schedule")
-async def send_invoice_schedule(session: AsyncSession = Depends(get_session)):
-    clients = await get_clients_due_today(session)
-
-    for client in clients:
-        asyncio.create_task(send_invoice(client, session))
+async def send_invoice_schedule():
+    print("Foi")
+    async with async_session() as session:
+        clients = await get_clients_due_today(session)
+        for client in clients:
+            await send_invoice(client, session)

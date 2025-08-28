@@ -19,7 +19,7 @@ async def lifespan(app: FastAPI):
     await init_models()
 
     scheduler.start()
-    scheduler.add_job(send_invoice_schedule, CronTrigger(hour=9, minute=0))
+    scheduler.add_job(send_invoice_schedule, CronTrigger(hour=12, minute=46))
 
     yield
     scheduler.shutdown()
@@ -33,7 +33,6 @@ app = FastAPI(
 )
 
 
-# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

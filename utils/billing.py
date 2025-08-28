@@ -37,10 +37,11 @@ def render_invoice_html(client, req_logs, upload_logs, total, pix_key):
 
 
 async def get_clients_due_today(session: AsyncSession):
-    stmt = select(Client).where(Client.invoice_due_day == date.today())
+    today_day = date.today().day
+    stmt = select(Client).where(Client.invoice_due_day == today_day)
     result = await session.execute(stmt)
 
-    return result.scalar().all()
+    return result.scalars().all()
 
 
 async def calc_billing(client_id: str, session: AsyncSession):
@@ -77,7 +78,7 @@ async def calc_billing(client_id: str, session: AsyncSession):
     client_amount = req_cost + upload_cost + total_reqs
     client_amount = client_amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
-    return {  # ✅ faltava return
+    return {
         "req_logs": req_logs,
         "req_cost": req_cost,
         "upload_logs": upload_logs,
@@ -88,7 +89,7 @@ async def calc_billing(client_id: str, session: AsyncSession):
 
 async def send_invoice(client: Client, session: AsyncSession):
     client_id = client.id
-    data = await calc_billing(client_id, session)  # ✅ faltava await
+    data = await calc_billing(client_id, session)
 
     req_logs = data["req_logs"]
     req_cost = data["req_cost"]
@@ -96,7 +97,7 @@ async def send_invoice(client: Client, session: AsyncSession):
     upload_cost = data["upload_cost"]
     client_amount = data["client_amount"]
 
-    description = f"Prezado {client.name}, essa cobrança advém dos serviços prestado pela API Getaway."
+    description = "By API Getaway"
     pix_key, qrcode = generate_qrcode_pix(
         client_id, client.name, client_amount, description
     )
@@ -146,6 +147,7 @@ def crc16(data: bytes) -> str:
 
 def generate_payload_pix(amount_due: float, name: str, description: str = "") -> str:
     payload = ""
+    amount_due = 2.0
 
     payload += "000201"
 

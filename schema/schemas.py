@@ -6,6 +6,7 @@ class ClientSchema(BaseModel):
     name: str
     email: str
     monthly_limit: int
+    invoice_due_day: int
 
     class Config:
         from_attributes = True
