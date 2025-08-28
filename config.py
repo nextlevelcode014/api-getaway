@@ -1,5 +1,6 @@
 import os
 from dotenv import load_dotenv
+from decimal import Decimal
 
 load_dotenv()
 
@@ -10,11 +11,19 @@ OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL")
 
 GEMINI_BASE_URL = os.getenv("GEMINI_BASE_URL")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+SMTP_SERVER = os.getenv("SMTP_SERVER")
+SMTP_PORT = os.getenv("SMTP_PORT")
+SMTP_USERNAME = os.getenv("SMTP_USERNAME")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
+SMTP_FROM_ADDRESS = os.getenv("SMTP_FROM_ADDRESS")
 
 
 DATABASE_PATH = "database"
 BASE = "base"
-VALUE_PER_REQUEST = 0.000005
+VALUE_PER_REQUEST = Decimal(0.000005)
 PRICE_PER_1K_TOKENS = 0.02
 PRICE_PER_1M_TOKENS = 0.35
 MAX_USER_CHARS = 500
+
+CHAVE_PIX = os.getenv("CHAVE_PIX")
+CIDADE_PIX = os.getenv("CIDADE_PIX")

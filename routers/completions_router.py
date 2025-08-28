@@ -1,19 +1,19 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
-
-from datetime import datetime, timezone
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from datetime import datetime
 from decimal import Decimal
 
 from schema.schemas import ChatRequestSchema
 from utils.auth_dependencies import get_current_client
 from text_response import question
 from utils.config_dependencies import (
-    create_session,
+    get_session,
     calculate_gemini_cost,
     calculate_openai_cost,
 )
-from model.db import ClientReqLog, Model
-from config import MAX_USER_CHARS, VALUE_PER_REQUEST
+from model.db import ClientReqLog, Model, Client
+from config import MAX_USER_CHARS
 
 completions_router = APIRouter(prefix="/v1", tags=["completions"])
 
@@ -26,8 +26,8 @@ async def health_check():
 @completions_router.post("/chat/completions")
 async def completions(
     chat_request: ChatRequestSchema,
-    client_data=Depends(get_current_client),
-    session: Session = Depends(create_session),
+    client: Client = Depends(get_current_client),
+    session: AsyncSession = Depends(get_session),
 ):
     if len(chat_request.prompt) > MAX_USER_CHARS:
         raise HTTPException(
@@ -35,22 +35,30 @@ async def completions(
             detail=f"Maximum characters exceeded: Maximum {MAX_USER_CHARS}",
         )
 
-    client = client_data
-
+    await session.refresh(client, attribute_names=["models"])
     allowed_models = [m.model_name for m in client.models]
+
     if chat_request.model not in allowed_models:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Model not allowed"
         )
 
-    result = question(client.id, chat_request.prompt, chat_request.model)
+    question_result = question(client.id, chat_request.prompt, chat_request.model)
+    usage = question_result["usage"]
+    response_text = question_result["response"]
 
-    model = session.query(Model).filter(Model.model_name == chat_request.model).first()
+    result = await session.execute(
+        select(Model).where(Model.model_name == chat_request.model)
+    )
+    model = result.scalars().first()
+    if not model:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Model not found"
+        )
 
-    input_tokens = result["usage"]["input_tokens"]
-    output_tokens = result["usage"]["output_tokens"]
-
-    cost = 0
+    input_tokens = usage["input_tokens"]
+    output_tokens = usage["output_tokens"]
+    total_tokens = usage["total_tokens"]
 
     if chat_request.model.startswith("gpt-"):
         cost = calculate_openai_cost(
@@ -66,16 +74,8 @@ async def completions(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
         )
-
-    total_tokens = result["usage"]["total_tokens"]
-
-    client.total_request_current_month += 1
-    client.total_cost_of_requests = (
-        client.total_cost_of_requests or Decimal("0")
-    ) + Decimal(VALUE_PER_REQUEST)
-    client.total_tokens += total_tokens
-    client.amount_due = (client.amount_due or Decimal("0")) + cost
-    client.last_request_at = datetime.now(timezone.utc)
+    else:
+        cost = Decimal("0")
 
     log = ClientReqLog(
         client_id=client.id,
@@ -87,10 +87,12 @@ async def completions(
         model_used=chat_request.model,
     )
     session.add(log)
-    session.commit()
+
+    await session.commit()
+    await session.refresh(log)
 
     return {
-        "response": result["response"],
+        "response": response_text,
         "usage": {
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,

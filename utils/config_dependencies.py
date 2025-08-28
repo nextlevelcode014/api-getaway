@@ -1,19 +1,16 @@
-from sqlalchemy.orm import sessionmaker
-from model.db import db
+from sqlalchemy.ext.asyncio import AsyncSession
+from model.db import async_session
 from decimal import Decimal
+from typing import AsyncGenerator
 import tiktoken
 import hashlib
 
 import secrets
 
 
-def create_session():
-    try:
-        Session = sessionmaker(bind=db)
-        session = Session()
+async def get_session() -> AsyncGenerator[AsyncSession, None]:
+    async with async_session() as session:
         yield session
-    finally:
-        session.close()
 
 
 def generate_secure_token():

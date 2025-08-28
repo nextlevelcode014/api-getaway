@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
 from datetime import datetime
-from utils.config_dependencies import create_session, generate_secure_token
+from utils.config_dependencies import get_session, generate_secure_token
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from utils.auth_dependencies import verify_admin_key
 from model.db import Client, ClientKey, Model, ClientUploadLog
-from sqlalchemy.orm import Session
 import shutil
 from pathlib import Path
 from decimal import Decimal
@@ -22,6 +23,8 @@ from utils.config_dependencies import (
 from config import PRICE_PER_1K_TOKENS, PRICE_PER_1M_TOKENS
 from PyPDF2 import PdfReader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+from sqlalchemy import select
+import aiofiles
 
 admin_router = APIRouter(prefix="/admin", tags=["administration"])
 
@@ -34,33 +37,38 @@ async def health_check():
 @admin_router.post("/add_client", dependencies=[Depends(verify_admin_key)])
 async def add_client(
     client_schema: ClientSchema,
-    session: Session = Depends(create_session),
+    session: AsyncSession = Depends(get_session),
 ):
-    client = session.query(Client).filter(Client.email == client_schema.email).first()
+    result = await session.execute(
+        select(Client).where(Client.email == client_schema.email)
+    )
+    client = result.scalars().first()
 
     if client:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Unavailable"
         )
-    else:
-        new_client = Client(
-            client_schema.name,
-            client_schema.email,
-            client_schema.monthly_limit,
-        )
-        session.add(new_client)
-        session.commit()
 
-        return {"message": "Client added successfully"}
+    new_client = Client(
+        name=client_schema.name,
+        email=client_schema.email,
+        monthly_limit=client_schema.monthly_limit,
+    )
+    session.add(new_client)
+    await session.commit()
+    await session.refresh(new_client)
+
+    return new_client
 
 
 @admin_router.put("/update_client", dependencies=[Depends(verify_admin_key)])
 async def update_client(
     client_id: str,
     client_data: ClientUpdateSchema,
-    session: Session = Depends(create_session),
+    session: AsyncSession = Depends(get_session),
 ):
-    client = session.query(Client).filter(Client.id == client_id).first()
+    result = await session.execute(select(Client).where(Client.id == client_id))
+    client = result.scalars().first()
 
     if not client:
         raise HTTPException(
@@ -72,7 +80,7 @@ async def update_client(
     for key, value in update_data.items():
         setattr(client, key, value)
 
-    session.commit()
+    await session.commit()
     session.refresh(client)
 
     return {"response": "Client updated successfully"}
@@ -81,12 +89,12 @@ async def update_client(
 @admin_router.post("/create_client_key", dependencies=[Depends(verify_admin_key)])
 async def create_client_key(
     client_id: str,
-    session: Session = Depends(create_session),
+    session: AsyncSession = Depends(get_session),
 ):
     token = generate_secure_token()
     new_client_key = ClientKey(client_id, token)
     session.add(new_client_key)
-    session.commit()
+    await session.commit()
 
     return {"message": "Client key created successfully"}
 
@@ -97,9 +105,12 @@ async def create_client_key(
 async def add_client_knowledgebase(
     client_id: str,
     model: str,
-    session: Session = Depends(create_session),
+    session: AsyncSession = Depends(get_session),
 ):
-    client = session.query(Client).filter(Client.id == client_id, Client.active).first()
+    result = await session.execute(
+        select(Client).where(Client.id == client_id, Client.active)
+    )
+    client = result.scalars().first()
 
     if not client:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unavailable")
@@ -116,9 +127,12 @@ async def add_client_knowledgebase(
 @admin_router.post("/revoke_client", dependencies=[Depends(verify_admin_key)])
 async def revoke_client(
     client_id: str,
-    session: Session = Depends(create_session),
+    session: AsyncSession = Depends(get_session),
 ):
-    client = session.query(Client).filter(Client.id == client_id, Client.active).first()
+    result = await session.execute(
+        select(Client).where(Client.id == client_id, Client.active)
+    )
+    client = result.scalars().first()
 
     if not client:
         raise HTTPException(
@@ -131,7 +145,7 @@ async def revoke_client(
     for key in client_key:
         key.active = False
 
-    session.commit()
+    await session.commit()
 
     return {"message": "Client revoke successfully"}
 
@@ -139,9 +153,10 @@ async def revoke_client(
 @admin_router.delete("/delete_client", dependencies=[Depends(verify_admin_key)])
 async def delete_client(
     client_id: str,
-    session: Session = Depends(create_session),
+    session: AsyncSession = Depends(get_session),
 ):
-    client = session.query(Client).filter(Client.id == client_id).first()
+    result = await session.execute(select(Client).where(Client.id == client_id))
+    client = result.scalars().first()
 
     if not client:
         raise HTTPException(
@@ -149,7 +164,7 @@ async def delete_client(
         )
 
     session.delete(client)
-    session.commit()
+    await session.commit()
 
     return {"message": "Client deleted successfully"}
 
@@ -157,7 +172,7 @@ async def delete_client(
 @admin_router.delete("/delete_client_key", dependencies=[Depends(verify_admin_key)])
 async def delete_client_key(
     client_key_id: str,
-    session: Session = Depends(create_session),
+    session: AsyncSession = Depends(get_session),
 ):
     client_key = (
         session.query(ClientKey)
@@ -169,7 +184,7 @@ async def delete_client_key(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unaivalable")
 
     session.delete(client_key)
-    session.commit()
+    await session.commit()
 
     return {"message": "Client Key revoke successfully"}
 
@@ -177,7 +192,7 @@ async def delete_client_key(
 @admin_router.post("/create_model", dependencies=[Depends(verify_admin_key)])
 async def create_model(
     new_model: ModelSchema,
-    session: Session = Depends(create_session),
+    session: AsyncSession = Depends(get_session),
 ):
     new_model = Model(
         new_model.model_name,
@@ -186,7 +201,7 @@ async def create_model(
         new_model.output_price,
     )
     session.add(new_model)
-    session.commit()
+    await session.commit()
 
     return {"message": "Model added successfully"}
 
@@ -194,17 +209,21 @@ async def create_model(
 @admin_router.post("/add_client_model", dependencies=[Depends(verify_admin_key)])
 async def add_client_model(
     data: AddClientModelSchema,
-    session: Session = Depends(create_session),
+    session: AsyncSession = Depends(get_session),
 ):
-    client = session.query(Client).filter(Client.id == data.client_id).first()
+    result = await session.execute(
+        select(Client)
+        .options(selectinload(Client.models))
+        .where(Client.id == data.client_id)
+    )
+    client = result.scalars().first()
 
     if not client:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Unavailable"
         )
 
-    model = session.query(Model).filter(Model.id == data.client_id).first()
-
+    model = await session.get(Model, data.model_id)
     if not model:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Unavailable"
@@ -212,12 +231,13 @@ async def add_client_model(
 
     if model in client.models:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Unavailable",
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Already linked"
         )
 
     client.models.append(model)
-    session.commit()
+    session.add(client)
+    await session.commit()
+    await session.refresh(client)
 
     return {"message": "Model linked to client successfully"}
 
@@ -225,9 +245,9 @@ async def add_client_model(
 @admin_router.delete("/delete_model", dependencies=[Depends(verify_admin_key)])
 async def delete_model(
     model_id: str,
-    session: Session = Depends(create_session),
+    session: AsyncSession = Depends(get_session),
 ):
-    model = session.query(Model).filter(Model.id == model_id).first()
+    model = await session.get(model_id)
 
     if not model:
         raise HTTPException(
@@ -235,7 +255,7 @@ async def delete_model(
         )
 
     session.delete(model)
-    session.commit()
+    await session.commit()
 
     return {"message": "Model deleted successfully"}
 
@@ -245,9 +265,9 @@ async def upload_client_pdfs(
     client_id: str,
     model: str,
     files: list[UploadFile] = File(...),
-    session: Session = Depends(create_session),
+    session: AsyncSession = Depends(get_session),
 ):
-    client = session.get(Client, client_id)
+    client = await session.get(Client, client_id)
     if not client:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Client not found"
@@ -260,8 +280,9 @@ async def upload_client_pdfs(
 
     for file in files:
         file_path = client_dir / file.filename
-        with open(file_path, "wb") as f:
-            shutil.copyfileobj(file.file, f)
+        async with aiofiles.open(file_path, "wb") as f:
+            content = await file.read()
+            await f.write(content)
 
         reader = PdfReader(file_path)
         text = "\n".join([page.extract_text() or "" for page in reader.pages])
@@ -272,29 +293,32 @@ async def upload_client_pdfs(
         for chunk in chunks:
             total_tokens += count_tokens(chunk, model)
 
-    cost = 0
-
+    cost = Decimal("0")
     if model.startswith("gpt-"):
-        cost = calculate_total_upload_cost_openai(
-            embedding_tokens=total_tokens, price_per_1k_tokens=PRICE_PER_1K_TOKENS
+        cost = Decimal(
+            calculate_total_upload_cost_openai(total_tokens, PRICE_PER_1K_TOKENS)
         )
     elif model.startswith("gemini-"):
-        cost = calculate_total_upload_cost_gemini(
-            embedding_tokens=total_tokens, price_per_1M_tokens=PRICE_PER_1M_TOKENS
+        cost = Decimal(
+            calculate_total_upload_cost_gemini(total_tokens, PRICE_PER_1M_TOKENS)
+        )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Unaivalable"
         )
 
     client.upload_tokens += total_tokens
-    client.total_upload_cost = (
-        Decimal(client.total_upload_cost) or Decimal("0")
-    ) + cost
+    session.add(client)
 
     upload_log = ClientUploadLog(
-        embedding_tokens=total_tokens, model_used=model, upload_cost=cost
+        client_id=client_id,
+        embedding_tokens=total_tokens,
+        model_used=model,
+        upload_cost=cost,
     )
-
     session.add(upload_log)
 
-    session.commit()
+    await session.commit()
 
     create_db(client_id, model)
 
@@ -308,9 +332,9 @@ async def upload_client_pdfs(
 @admin_router.delete("/delete_client_base", dependencies=[Depends(verify_admin_key)])
 async def delete_client_base(
     client_id: str,
-    session: Session = Depends(create_session),
+    session: AsyncSession = Depends(get_session),
 ):
-    client = session.get(Client, client_id)
+    client = await session.get(Client, client_id)
     if not client:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Client not found"
@@ -326,3 +350,16 @@ async def delete_client_base(
         shutil.rmtree(vector_dir)
 
     return {"message": f"All PDFs and knowledge base deleted for client {client_id}"}
+
+
+@admin_router.get("/client_stats", dependencies=[Depends(verify_admin_key)])
+async def client_stats(client_id: str, session: AsyncSession = Depends(get_session)):
+    client = await session.get(Client, client_id)
+    if not client:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Client not found"
+        )
+
+    return {
+        "client": client,
+    }

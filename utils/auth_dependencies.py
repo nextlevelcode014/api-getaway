@@ -1,9 +1,11 @@
 from fastapi.security import HTTPAuthorizationCredentials
 from fastapi import Depends, HTTPException, status
-from sqlalchemy.orm import Session
 from config import ADMIN_API_KEY
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from model.db import ClientKey
-from utils.config_dependencies import create_session
+from utils.config_dependencies import get_session
 from security import security
 
 
@@ -18,12 +20,16 @@ async def verify_admin_key(
 
 async def get_current_client(
     credentials: HTTPAuthorizationCredentials = Depends(security),
-    session: Session = Depends(create_session),
+    session: AsyncSession = Depends(get_session),
 ):
     token = credentials.credentials
-    client_key = (
-        session.query(ClientKey).filter(ClientKey.client_key_hash == token).first()
+
+    result = await session.execute(
+        select(ClientKey)
+        .options(selectinload(ClientKey.client_rel))
+        .where(ClientKey.client_key_hash == token)
     )
+    client_key = result.scalars().first()
 
     if not client_key:
         raise HTTPException(
@@ -35,12 +41,6 @@ async def get_current_client(
     if not client or not client.active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized"
-        )
-
-    if client.total_tokens >= client.monthly_limit:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Monthly limit reached ({client.monthly_limit} tokens)",
         )
 
     return client

@@ -1,5 +1,4 @@
 from sqlalchemy import (
-    create_engine,
     Column,
     String,
     Integer,
@@ -11,12 +10,19 @@ from sqlalchemy import (
     Table,
     Numeric,
 )
-from sqlalchemy.orm import declarative_base, relationship
+
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.orm import declarative_base, relationship, sessionmaker
+from decimal import Decimal
+
 import os
 
 os.makedirs("database", exist_ok=True)
 
-db = create_engine("sqlite:///database/sqlite.db")
+DATABASE_URL = "sqlite+aiosqlite:///database/sqlite.db"
+
+db = create_async_engine(DATABASE_URL, echo=False, future=True)
+async_session = sessionmaker(db, class_=AsyncSession, expire_on_commit=False)
 
 Base = declarative_base()
 
@@ -41,15 +47,24 @@ class Client(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
-    models = relationship("Model", secondary=client_models, back_populates="clients")
+    models = relationship(
+        "Model",
+        secondary=client_models,
+        back_populates="clients",
+    )
+    client_req_logs = relationship(
+        "ClientReqLog", cascade="all, delete-orphan", back_populates="clients"
+    )
+    client_upload_logs = relationship(
+        "ClientUploadLog", cascade="all, delete-orphan", back_populates="clients"
+    )
     monthly_limit = Column(Float, default=2000)
-    total_cost_of_requests = Column(Numeric(precision=18, scale=6), default=0)
-    total_request_current_month = Column(Integer, default=0)
-    amount_due = Column(Numeric(precision=12, scale=2), default=0)
-    total_tokens = Column(Float, default=0)
+    cost = Column(
+        Numeric(precision=12, scale=6), nullable=True, default=Decimal("0.00")
+    )
     upload_tokens = Column(Float, default=0)
-    total_upload_cost = Column(Numeric(precision=12, scale=2), default=0)
     active = Column(Boolean, default=True)
+    invoice_due_day = Column(DateTime, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     last_reset = Column(DateTime, server_default=func.now())
 
@@ -69,16 +84,17 @@ class ClientReqLog(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     client_id = Column(Integer, ForeignKey("clients.id", ondelete="CASCADE"))
+    clients = relationship("Client", back_populates="client_req_logs")
     endpoint = Column(String, nullable=True)
     input_tokens = Column(Float, nullable=True)
     output_tokens = Column(Float, nullable=True)
     total_token_used = Column(Float, nullable=True)
     model_used = Column(String, nullable=True)
-    cost = Column(Float, nullable=True)
+    cost = Column(
+        Numeric(precision=12, scale=6), nullable=True, default=Decimal("0.00")
+    )
 
     created_at = Column(DateTime, server_default=func.now())
-
-    client = relationship("Client", backref="logs")
 
     def __init__(
         self,
@@ -103,11 +119,16 @@ class ClientUploadLog(Base):
     __tablename__ = "client_upload_logs"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    upload_cost = Column(Numeric(precision=12, scale=2), default=0)
+    client_id = Column(Integer, ForeignKey("clients.id", ondelete="CASCADE"))
+    clients = relationship("Client", back_populates="client_upload_logs")
+    upload_cost = Column(
+        Numeric(precision=12, scale=6), nullable=True, default=Decimal("0.00")
+    )
     embedding_tokens = Column(Float, default=0)
     model_used = Column(String, nullable=True)
 
-    def __init__(self, upload_cost, embedding_tokens, model_used):
+    def __init__(self, client_id, upload_cost, embedding_tokens, model_used):
+        self.client_id = client_id
         self.upload_cost = upload_cost
         self.embedding_tokens = embedding_tokens
         self.model_used = model_used
@@ -120,8 +141,12 @@ class Model(Base):
     model_name = Column(String, nullable=False, unique=True)
     clients = relationship("Client", secondary=client_models, back_populates="models")
     token_limit = Column(Integer, nullable=True)
-    input_price = Column(Numeric(precision=12, scale=2), default=0)
-    output_price = Column(Numeric(precision=12, scale=2), default=0)
+    input_price = Column(
+        Numeric(precision=12, scale=6), nullable=True, default=Decimal("0.00")
+    )
+    output_price = Column(
+        Numeric(precision=12, scale=6), nullable=True, default=Decimal("0.00")
+    )
 
     def __init__(self, model_name, token_limit, input_price, output_price):
         self.model_name = model_name
@@ -145,4 +170,29 @@ class ClientKey(Base):
         self.client_key_hash = client_key_hash
 
 
-Base.metadata.create_all(db)
+class Billing(Base):
+    __tablename__ = "billings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True, nullable=True)
+    client = Column(Integer, ForeignKey("clients.id", ondelete="CASCADE"))
+    req_cost = Column(
+        Numeric(precision=12, scale=6), nullable=True, default=Decimal("0.00")
+    )
+    upload_cost = Column(
+        Numeric(precision=12, scale=6), nullable=True, default=Decimal("0.00")
+    )
+    total_paid = Column(
+        Numeric(precision=12, scale=6), nullable=True, default=Decimal("0.00")
+    )
+    date = Column(DateTime, server_default=func.now())
+
+    def __init__(self, client, req_cost, upload_cost, total_paid):
+        self.client = client
+        self.req_cost = req_cost
+        self.upload_cost = upload_cost
+        self.total_paid = total_paid
+
+
+async def init_models():
+    async with db.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
