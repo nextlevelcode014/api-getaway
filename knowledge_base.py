@@ -1,9 +1,11 @@
-from langchain_community.document_loaders import PyPDFDirectoryLoader
+from pypdf import PdfReader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_chroma.vectorstores import Chroma
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_openai import OpenAIEmbeddings
 from dotenv import load_dotenv
+from langchain.schema import Document
+from io import BytesIO
 import os
 
 load_dotenv()
@@ -12,15 +14,21 @@ BASE_DIR = "base"
 VECTOR_DIR = "vectorstores"
 
 
-def create_db(client_id: str, model_type: str):
-    documents = load_documents(client_id)
+def create_db(client_id: str, model_type: str, pdf_bytes_list: list[bytes]):
+    documents = load_documents_from_bytes(pdf_bytes_list)
     chunks = splitter_chunks(documents)
     return vetorize_chunks(chunks, client_id, model_type)
 
 
-def load_documents(client_id: str):
-    loader = PyPDFDirectoryLoader(f"{BASE_DIR}/{client_id}")
-    return loader.load()
+def load_documents_from_bytes(pdf_bytes_list: list[bytes]):
+    documents = []
+    for pdf_bytes in pdf_bytes_list:
+        reader = PdfReader(BytesIO(pdf_bytes))
+        text = ""
+        for page in reader.pages:
+            text += page.extract_text() + "\n"
+        documents.append(Document(page_content=text))
+    return documents
 
 
 def splitter_chunks(documents):

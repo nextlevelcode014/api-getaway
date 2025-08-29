@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      margin: 40px;
+      color: #333;
+    }
+    .header {
+      text-align: center;
+      border-bottom: 2px solid #000;
+      padding-bottom: 10px;
+      margin-bottom: 20px;
+    }
+    .header h1 {
+      margin: 0;
+      font-size: 22px;
+    }
+    .header p {
+      margin: 4px 0;
+      font-size: 14px;
+    }
+    .info, .payment {
+      width: 100%;
+      margin-bottom: 20px;
+    }
+    .info td, .payment td {
+      padding: 6px;
+      font-size: 14px;
+    }
+    .info td.label, .payment td.label {
+      font-weight: bold;
+      width: 180px;
+    }
+    .footer {
+      border-top: 1px solid #ccc;
+      padding-top: 10px;
+      font-size: 12px;
+      text-align: center;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Recibo de Pagamento</h1>
+    <p>{{ company_name }}</p>
+  </div>
+
+  <table class="info">
+    <tr>
+      <td class="label">Cliente:</td>
+      <td>{{ client.name }}</td>
+    </tr>
+    <tr>
+      <td class="label">E-mail:</td>
+      <td>{{ client.email }}</td>
+    </tr>
+    <tr>
+      <td class="label">Fatura nº:</td>
+      <td>{{ billing.id }}</td>
+    </tr>
+  </table>
+
+  <table class="payment">
+    <tr>
+      <td class="label">Valor pago:</td>
+      <td>R$ {{ billing.amount_due }}</td>
+    </tr>
+    <tr>
+      <td class="label">Data do pagamento:</td>
+      <td>{{ billing.paid_at }}</td>
+    </tr>
+    <!--<tr>
+      <td class="label">Forma de pagamento:</td>
+      <td>{{ billing.method }}</td>
+    </tr> -->
+  </table>
+
+  <p>
+    Declaramos para os devidos fins que recebemos o valor acima discriminado do(a) cliente 
+    <strong>{{ client.name }}</strong>, referente à fatura informada.
+  </p>
+
+  <div class="footer">
+    <p>Emitido em {{ issue_date }}</p>
+    <p>Este recibo foi gerado automaticamente pelo sistema da {{ company_name }}.</p>
+  </div>
+</body>
+</html>

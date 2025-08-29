@@ -1,8 +1,11 @@
 import os
 from dotenv import load_dotenv
 from decimal import Decimal
+from jinja2 import Environment, FileSystemLoader
 
 load_dotenv()
+
+env = Environment(loader=FileSystemLoader("templates"))
 
 SECRET_KEY = os.getenv("SECRET_KEY")
 ADMIN_API_KEY = os.getenv("ADMIN_API_KEY")
@@ -34,3 +37,4 @@ BASE_URL = "https://seuservidor.com"
 
 
 RECEIPTS_DIR = "./receipts"
+COMPANY_NAME = "API Getaway"

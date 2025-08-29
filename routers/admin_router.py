@@ -1,5 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
-from datetime import datetime
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile
 from utils.config_dependencies import get_session, generate_secure_token
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -14,24 +13,20 @@ from schema.schemas import (
     ClientUpdateSchema,
     AddClientModelSchema,
 )
-from knowledge_base import create_db, BASE_DIR, VECTOR_DIR
+from knowledge_base import create_db, VECTOR_DIR
 from utils.config_dependencies import (
     calculate_total_upload_cost_gemini,
     calculate_total_upload_cost_openai,
     count_tokens,
 )
+from utils.billing import calc_billing
 from config import PRICE_PER_1K_TOKENS, PRICE_PER_1M_TOKENS
 from PyPDF2 import PdfReader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+from io import BytesIO
 from sqlalchemy import select
-import aiofiles
 
 admin_router = APIRouter(prefix="/admin", tags=["administration"])
-
-
-@admin_router.get("/health")
-async def health_check():
-    return {"status": "admin healthy", "timestamp": datetime.now().isoformat()}
 
 
 @admin_router.post("/add_client", dependencies=[Depends(verify_admin_key)])
@@ -106,6 +101,7 @@ async def create_client_key(
 async def add_client_knowledgebase(
     client_id: str,
     model: str,
+    files: list[UploadFile],
     session: AsyncSession = Depends(get_session),
 ):
     result = await session.execute(
@@ -116,13 +112,60 @@ async def add_client_knowledgebase(
     if not client:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unavailable")
 
-    if not create_db(client.id, model):
+    pdf_bytes_list = [await f.read() for f in files]
+
+    if not create_db(client.id, model, pdf_bytes_list):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Something went wrong",
         )
 
-    return {"message": "Knowledgebase created successfully"}
+    total_tokens = 0
+
+    for pdf_bytes in pdf_bytes_list:
+        pdf_stream = BytesIO(pdf_bytes)
+
+        reader = PdfReader(pdf_stream)
+        text = "\n".join([page.extract_text() or "" for page in reader.pages])
+
+        splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=200)
+        chunks = splitter.split_text(text)
+
+        for chunk in chunks:
+            total_tokens += count_tokens(chunk, model)
+
+    cost = Decimal("0")
+    if model.startswith("gpt-"):
+        cost = Decimal(
+            calculate_total_upload_cost_openai(total_tokens, PRICE_PER_1K_TOKENS)
+        )
+    elif model.startswith("gemini-"):
+        cost = Decimal(
+            calculate_total_upload_cost_gemini(total_tokens, PRICE_PER_1M_TOKENS)
+        )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Unaivalable"
+        )
+
+    client.upload_tokens += total_tokens
+    session.add(client)
+
+    upload_log = ClientUploadLog(
+        client_id=client_id,
+        embedding_tokens=total_tokens,
+        model_used=model,
+        upload_cost=cost,
+    )
+    session.add(upload_log)
+
+    await session.commit()
+
+    return {
+        "message": f"{len(files)} files uploaded and knowledge base updated",
+        "tokens_indexed": total_tokens,
+        "estimated_cost_usd": round(cost, 4),
+    }
 
 
 @admin_router.post("/revoke_client", dependencies=[Depends(verify_admin_key)])
@@ -261,75 +304,6 @@ async def delete_model(
     return {"message": "Model deleted successfully"}
 
 
-@admin_router.post("/upload_client_pdfs", dependencies=[Depends(verify_admin_key)])
-async def upload_client_pdfs(
-    client_id: str,
-    model: str,
-    files: list[UploadFile] = File(...),
-    session: AsyncSession = Depends(get_session),
-):
-    client = await session.get(Client, client_id)
-    if not client:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Client not found"
-        )
-
-    client_dir = Path(BASE_DIR) / str(client_id)
-    client_dir.mkdir(parents=True, exist_ok=True)
-
-    total_tokens = 0
-
-    for file in files:
-        file_path = client_dir / file.filename
-        async with aiofiles.open(file_path, "wb") as f:
-            content = await file.read()
-            await f.write(content)
-
-        reader = PdfReader(file_path)
-        text = "\n".join([page.extract_text() or "" for page in reader.pages])
-
-        splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=200)
-        chunks = splitter.split_text(text)
-
-        for chunk in chunks:
-            total_tokens += count_tokens(chunk, model)
-
-    cost = Decimal("0")
-    if model.startswith("gpt-"):
-        cost = Decimal(
-            calculate_total_upload_cost_openai(total_tokens, PRICE_PER_1K_TOKENS)
-        )
-    elif model.startswith("gemini-"):
-        cost = Decimal(
-            calculate_total_upload_cost_gemini(total_tokens, PRICE_PER_1M_TOKENS)
-        )
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Unaivalable"
-        )
-
-    client.upload_tokens += total_tokens
-    session.add(client)
-
-    upload_log = ClientUploadLog(
-        client_id=client_id,
-        embedding_tokens=total_tokens,
-        model_used=model,
-        upload_cost=cost,
-    )
-    session.add(upload_log)
-
-    await session.commit()
-
-    create_db(client_id, model)
-
-    return {
-        "message": f"{len(files)} files uploaded and knowledge base updated",
-        "tokens_indexed": total_tokens,
-        "estimated_cost_usd": round(cost, 4),
-    }
-
-
 @admin_router.delete("/delete_client_base", dependencies=[Depends(verify_admin_key)])
 async def delete_client_base(
     client_id: str,
@@ -341,26 +315,24 @@ async def delete_client_base(
             status_code=status.HTTP_404_NOT_FOUND, detail="Client not found"
         )
 
-    pdf_dir = Path(BASE_DIR) / str(client_id)
-
-    if pdf_dir.exists():
-        shutil.rmtree(pdf_dir)
-
     vector_dir = Path(VECTOR_DIR) / str(client_id)
     if vector_dir.exists():
         shutil.rmtree(vector_dir)
 
-    return {"message": f"All PDFs and knowledge base deleted for client {client_id}"}
+    return {"message": f"Knowledge base deleted for client {client_id}"}
 
 
 @admin_router.get("/client_stats", dependencies=[Depends(verify_admin_key)])
 async def client_stats(client_id: str, session: AsyncSession = Depends(get_session)):
     client = await session.get(Client, client_id)
+
     if not client:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Client not found"
         )
 
+    stats = await calc_billing(client_id, session)
+
     return {
-        "client": client,
+        "stats": stats,
     }

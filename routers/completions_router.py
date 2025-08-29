@@ -18,11 +18,6 @@ from config import MAX_USER_CHARS
 completions_router = APIRouter(prefix="/v1", tags=["completions"])
 
 
-@completions_router.get("/health")
-async def health_check():
-    return {"status": "completions healthy", "timestamp": datetime.now().isoformat()}
-
-
 @completions_router.post("/chat/completions")
 async def completions(
     chat_request: ChatRequestSchema,

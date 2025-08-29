@@ -1,4 +1,3 @@
-from jinja2 import Environment, FileSystemLoader
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -15,14 +14,14 @@ from config import (
     SMTP_SERVER,
     SMTP_USERNAME,
 )
-from config import VALUE_PER_REQUEST, CHAVE_PIX, CIDADE_PIX, SMTP_PORT
+from config import VALUE_PER_REQUEST, CHAVE_PIX, CIDADE_PIX, SMTP_PORT, env
+from weasyprint import HTML
+from jinja2 import Template
 import qrcode
 import smtplib
 import io
 import uuid
 import secrets
-
-env = Environment(loader=FileSystemLoader("templates"))
 
 
 def generate_billing_hash() -> str:
@@ -30,7 +29,7 @@ def generate_billing_hash() -> str:
 
 
 def generate_pay_hash(length: int = 32) -> str:
-    return secrets.token_hex(length // 2)  # ex: 32 caracteres hexadecimais
+    return secrets.token_hex(length // 2)
 
 
 def render_invoice_html(client, req_logs, upload_logs, total, pix_key, pay_url):
@@ -41,7 +40,7 @@ def render_invoice_html(client, req_logs, upload_logs, total, pix_key, pay_url):
         upload_logs=upload_logs,
         total=total,
         pix_key=pix_key,
-        today=datetime.now().strftime("%d/%m/%Y"),
+        today=datetime.now().date(),
         pay_url=pay_url,
     )
 
@@ -52,6 +51,26 @@ def render_verify_billing_html(client_id, download_url, confirm_url):
         client_id=client_id,
         download_url=download_url,
         confirm_url=confirm_url,
+    )
+
+
+def render_billing_paid_html(client_name, billing, receipt_url, support_email):
+    template = env.get_template("billing_paid.html")
+    return template.render(
+        client_name=client_name,
+        billing=billing,
+        receipt_url=receipt_url,
+        support_email=support_email,
+    )
+
+
+def render_client_receipt_html(client, billing, issue_date, company_name):
+    template = env.get_template("receipt.html")
+    return template.render(
+        client=client,
+        billing=billing,
+        issue_date=issue_date,
+        company_name=company_name,
     )
 
 
@@ -127,12 +146,15 @@ async def send_invoice(billing: Billing, session: AsyncSession):
         client, req_logs, upload_logs, client_amount, pix_key, pay_url
     )
 
+    client.active = False
     billing.pay_hash = pay_hash
     billing.amount_due = client_amount
 
     session.add(billing)
+    session.add(client)
     await session.commit()
     await session.refresh(billing)
+    await session.refresh(client)
 
     subject = "API Getaway Fatura"
 
@@ -233,3 +255,12 @@ def generate_qrcode_pix(
     buffer.seek(0)
 
     return payload, buffer
+
+
+def generate_receipt_pdf(html_template: str, context: dict, output_path: str):
+    template = Template(html_template)
+    rendered_html = template.render(context)
+
+    pdf_bytes = HTML(string=rendered_html).write_pdf()
+
+    return pdf_bytes

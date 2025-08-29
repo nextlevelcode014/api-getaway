@@ -16,6 +16,12 @@ class BillingShema(BaseModel):
     due_date: int
 
 
+class UpdateBillingSchema(BaseModel):
+    billing_id: str
+    due_date: int
+    status: bool
+
+
 class ModelSchema(BaseModel):
     model_name: str
     token_limit: int
