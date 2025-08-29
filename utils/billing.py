@@ -2,12 +2,12 @@ from jinja2 import Environment, FileSystemLoader
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from model.db import Client
 from datetime import date
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.image import MIMEImage
-from model.db import ClientReqLog, ClientUploadLog, Billing
+from model.db import ClientReqLog, ClientUploadLog, Billing, Client
+from typing import Optional
 from decimal import Decimal, ROUND_HALF_UP
 from config import (
     SMTP_FROM_ADDRESS,
@@ -15,16 +15,25 @@ from config import (
     SMTP_SERVER,
     SMTP_USERNAME,
 )
-from config import VALUE_PER_REQUEST, CHAVE_PIX, CIDADE_PIX
+from config import VALUE_PER_REQUEST, CHAVE_PIX, CIDADE_PIX, SMTP_PORT
 import qrcode
 import smtplib
 import io
-
+import uuid
+import secrets
 
 env = Environment(loader=FileSystemLoader("templates"))
 
 
-def render_invoice_html(client, req_logs, upload_logs, total, pix_key):
+def generate_billing_hash() -> str:
+    return uuid.uuid4().hex
+
+
+def generate_pay_hash(length: int = 32) -> str:
+    return secrets.token_hex(length // 2)  # ex: 32 caracteres hexadecimais
+
+
+def render_invoice_html(client, req_logs, upload_logs, total, pix_key, pay_url):
     template = env.get_template("invoice.html")
     return template.render(
         client=client,
@@ -33,12 +42,22 @@ def render_invoice_html(client, req_logs, upload_logs, total, pix_key):
         total=total,
         pix_key=pix_key,
         today=datetime.now().strftime("%d/%m/%Y"),
+        pay_url=pay_url,
     )
 
 
-async def get_clients_due_today(session: AsyncSession):
+def render_verify_billing_html(client_id, download_url, confirm_url):
+    template = env.get_template("verify_billing.html")
+    return template.render(
+        client_id=client_id,
+        download_url=download_url,
+        confirm_url=confirm_url,
+    )
+
+
+async def get_billings_due_today(session: AsyncSession):
     today_day = date.today().day
-    stmt = select(Client).where(Client.invoice_due_day == today_day)
+    stmt = select(Billing).where(Billing.due_date == today_day)
     result = await session.execute(stmt)
 
     return result.scalars().all()
@@ -87,14 +106,13 @@ async def calc_billing(client_id: str, session: AsyncSession):
     }
 
 
-async def send_invoice(client: Client, session: AsyncSession):
+async def send_invoice(billing: Billing, session: AsyncSession):
+    client = await session.get(Client, billing.client_id)
     client_id = client.id
     data = await calc_billing(client_id, session)
 
     req_logs = data["req_logs"]
-    req_cost = data["req_cost"]
     upload_logs = data["upload_logs"]
-    upload_cost = data["upload_cost"]
     client_amount = data["client_amount"]
 
     description = "By API Getaway"
@@ -102,34 +120,28 @@ async def send_invoice(client: Client, session: AsyncSession):
         client_id, client.name, client_amount, description
     )
 
+    pay_hash = generate_pay_hash()
+    pay_url = f"https://nextlevelcodeblog-front.vercel.app/{pay_hash}"
+
     html_content = render_invoice_html(
-        client,
-        req_logs,
-        upload_logs,
-        client_amount,
-        pix_key,
+        client, req_logs, upload_logs, client_amount, pix_key, pay_url
     )
 
-    billing = Billing(client_id, req_cost, upload_cost, client_amount)
+    billing.pay_hash = pay_hash
+    billing.amount_due = client_amount
+
     session.add(billing)
     await session.commit()
+    await session.refresh(billing)
 
-    msg = MIMEMultipart("related")
-    msg["From"] = SMTP_FROM_ADDRESS
-    msg["To"] = client.email
-    msg["Subject"] = "Sua fatura mensal"
+    subject = "API Getaway Fatura"
 
-    msg.attach(MIMEText(html_content, "html"))
-
-    if qrcode:
-        img_data = qrcode.getvalue()
-        image = MIMEImage(img_data)
-        image.add_header("Content-ID", "<qrcode>")
-        msg.attach(image)
-
-    with smtplib.SMTP_SSL(SMTP_SERVER, 465) as server:
-        server.login(SMTP_USERNAME, SMTP_PASSWORD)
-        server.send_message(msg)
+    await send_email(
+        client.email,
+        subject,
+        html_content,
+        qrcode,
+    )
 
 
 def crc16(data: bytes) -> str:
@@ -143,6 +155,40 @@ def crc16(data: bytes) -> str:
                 crc <<= 1
             crc &= 0xFFFF
     return f"{crc:04X}"
+
+
+async def send_email(
+    to_email: str,
+    subject: str,
+    html_content: str,
+    qrcode: Optional[bytes] = None,
+    attachments: Optional[list[tuple[str, bytes]]] = None,
+):
+    msg = MIMEMultipart("related")
+    msg["From"] = SMTP_FROM_ADDRESS
+    msg["To"] = to_email
+    msg["Subject"] = subject
+
+    msg.attach(MIMEText(html_content, "html"))
+
+    if qrcode:
+        image = MIMEImage(qrcode.getvalue())
+        image.add_header("Content-ID", "<qrcode>")
+        msg.attach(image)
+
+    if attachments:
+        for filename, file_bytes in attachments:
+            part = (
+                MIMEImage(file_bytes)
+                if filename.endswith((".png", ".jpg", ".jpeg"))
+                else MIMEText(file_bytes.decode("utf-8"), "plain")
+            )
+            part.add_header("Content-Disposition", f'attachment; filename="{filename}"')
+            msg.attach(part)
+
+    with smtplib.SMTP_SSL(SMTP_SERVER, SMTP_PORT) as server:
+        server.login(SMTP_USERNAME, SMTP_PASSWORD)
+        server.send_message(msg)
 
 
 def generate_payload_pix(amount_due: float, name: str, description: str = "") -> str:

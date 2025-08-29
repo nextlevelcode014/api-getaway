@@ -27,3 +27,10 @@ MAX_USER_CHARS = 500
 
 CHAVE_PIX = os.getenv("CHAVE_PIX")
 CIDADE_PIX = os.getenv("CIDADE_PIX")
+
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL")
+
+BASE_URL = "https://seuservidor.com"
+
+
+RECEIPTS_DIR = "./receipts"

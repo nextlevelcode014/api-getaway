@@ -6,10 +6,14 @@ class ClientSchema(BaseModel):
     name: str
     email: str
     monthly_limit: int
-    invoice_due_day: int
 
     class Config:
         from_attributes = True
+
+
+class BillingShema(BaseModel):
+    client_id: str
+    due_date: int
 
 
 class ModelSchema(BaseModel):

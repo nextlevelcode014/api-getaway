@@ -19,7 +19,7 @@ async def lifespan(app: FastAPI):
     await init_models()
 
     scheduler.start()
-    scheduler.add_job(send_invoice_schedule, CronTrigger(hour=12, minute=46))
+    scheduler.add_job(send_invoice_schedule, CronTrigger(hour=20, minute=36))
 
     yield
     scheduler.shutdown()

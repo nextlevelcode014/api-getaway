@@ -53,8 +53,8 @@ async def add_client(
         name=client_schema.name,
         email=client_schema.email,
         monthly_limit=client_schema.monthly_limit,
-        invoice_due_day=client_schema.invoice_due_day,
     )
+
     session.add(new_client)
     await session.commit()
     await session.refresh(new_client)

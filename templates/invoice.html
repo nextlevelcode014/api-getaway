@@ -51,12 +51,21 @@
     <p><strong>Data de emissão:</strong> {{ today }}</p>
 
     <hr>
-    <h3>Pagamento via PIX</h3
+    <h3>Pagamento via PIX</h3>
     <p>Chave PIX: <strong>{{ pix_key }}</strong></p>
     {% if total > 0 %}
-    <p>Escaneie o QR Code abaixo para pagar:</p>
-    <img src="cid:qrcode" alt="QR Code PIX" style="width:200px;"/>
+      <p>Escaneie o QR Code abaixo para pagar:</p>
+      <img src="cid:qrcode" alt="QR Code PIX" style="width:200px;"/>
     {% endif %}
+
+    <hr>
+    <h3>Instruções para envio do comprovante:</h3>
+    <ol>
+      <li>Após efetuar o pagamento via PIX, acesse o link abaixo:</li>
+      <li>Envie o comprovante do pagamento como arquivo.</li>
+      <li>Não altere a hash na URL, ela identifica sua fatura.</li>
+    </ol>
+    <p><a href="{{ pay_url }}" target="_blank">{{ pay_url }}</a></p>
 
     <p>Obrigado por utilizar nossos serviços!</p>
   </body>

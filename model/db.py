@@ -64,15 +64,13 @@ class Client(Base):
     )
     upload_tokens = Column(Float, default=0)
     active = Column(Boolean, default=True)
-    invoice_due_day = Column(Integer, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
     last_reset = Column(DateTime, server_default=func.now())
 
-    def __init__(self, name, email, monthly_limit, invoice_due_day):
+    def __init__(self, name, email, monthly_limit):
         self.name = name
         self.email = email
         self.monthly_limit = monthly_limit
-        self.invoice_due_day = invoice_due_day
 
 
 class ClientReqLog(Base):
@@ -169,24 +167,33 @@ class ClientKey(Base):
 class Billing(Base):
     __tablename__ = "billings"
 
-    id = Column(Integer, primary_key=True, autoincrement=True, nullable=True)
-    client = Column(Integer, ForeignKey("clients.id", ondelete="CASCADE"))
-    req_cost = Column(
-        Numeric(precision=12, scale=6), nullable=True, default=Decimal("0.00")
+    id = Column(Integer, primary_key=True, autoincrement=True, nullable=False)
+    client_id = Column(
+        Integer, ForeignKey("clients.id", ondelete="CASCADE"), nullable=False
     )
-    upload_cost = Column(
-        Numeric(precision=12, scale=6), nullable=True, default=Decimal("0.00")
-    )
-    total_paid = Column(
-        Numeric(precision=12, scale=6), nullable=True, default=Decimal("0.00")
-    )
-    date = Column(DateTime, server_default=func.now())
+    client = relationship("Client")
+    receipt_file = Column(String, unique=True, nullable=True)
 
-    def __init__(self, client, req_cost, upload_cost, total_paid):
-        self.client = client
-        self.req_cost = req_cost
-        self.upload_cost = upload_cost
-        self.total_paid = total_paid
+    pay_hash = Column(String(64), unique=True, index=True, nullable=True)
+
+    amount_due = Column(Numeric(12, 6), nullable=True, default=Decimal("0.00"))
+
+    status = Column(Boolean, default=False)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    due_date = Column(Integer, nullable=True)
+    paid_at = Column(DateTime(timezone=True), nullable=True)
+
+    def __init__(
+        self,
+        client: str,
+        due_date: int = None,
+    ):
+        self.client_id = client
+        self.due_date = due_date
+
+    def __repr__(self):
+        return f"<Billing id={self.id} client={self.client} due={self.due_date} status={self.status}>"
 
 
 async def init_models():
