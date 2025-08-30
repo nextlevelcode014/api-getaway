@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Confirmação de Pagamento</title>
+  <style>
+    body { font-family: Arial, Helvetica, sans-serif; color: #333; background: #f6f7fb; margin: 0; padding: 20px; }
+    .container { max-width: 680px; margin: auto; background: #fff; border-radius: 8px; padding: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+    h1 { font-size: 20px; margin: 0 0 12px; color: #111; }
+    p { margin: 10px 0; line-height: 1.5; }
+    .summary { background:#fafafa; border:1px solid #eee; padding:12px; border-radius:6px; margin:12px 0; }
+    .summary dt { font-weight:600; }
+    .summary dd { margin: 0 0 8px 0; }
+    .btn { display:inline-block; padding:10px 16px; border-radius:6px; text-decoration:none; font-weight:600; }
+    .btn-primary { background:#007bff; color:#fff; }
+    .footer { font-size:13px; color:#666; margin-top:18px; }
+    .small { font-size:13px; color:#666; }
+    @media (max-width:480px) {
+      .container { padding:16px; }
+      h1 { font-size:18px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Pagamento Recebido — Obrigado, {{ client_name }}</h1>
+
+    <p>Confirmamos o recebimento do seu pagamento. Obrigado por quitar a fatura.</p>
+
+    <div class="summary" role="group" aria-label="Resumo do pagamento">
+      <dl>
+        <dt>Valor pago</dt>
+        <dd>R$ {{ billing.amount_due }}</dd>
+
+        <dt>Data do pagamento</dt>
+        <dd>{{ billing.paid_at }}</dd>
+
+        <dt>Fatura</dt>
+        <dd>{{ billing.id }}</dd>
+      </dl>
+    </div>
+
+    <p>Se desejar, você pode baixar nosso comprovante oficial no link abaixo:</p>
+
+    <p>
+      <a href="{{ receipt_url }}" class="btn btn-primary" target="_blank" rel="noopener">Baixar Comprovante</a>
+    </p>
+
+    <p class="small">Caso não tenha autorizado este pagamento, entre em contato imediatamente com nossa equipe de suporte em <a href="mailto:{{ support_email }}">{{ support_email }}</a>.</p>
+
+    <div class="footer">
+      <p>Atenciosamente,<br/>Equipe {{ company_name }}</p>
+      <p class="small">Esta é uma mensagem automática. Por favor, não responda este e-mail.</p>
+    </div>
+  </div>
+</body>
+</html>
